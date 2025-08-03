@@ -3,7 +3,11 @@ package com.android.darkelixir;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Environment;
+import android.view.View;
 import android.view.WindowManager;
+import android.view.animation.Animation;
+import android.view.animation.RotateAnimation;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
@@ -24,6 +28,7 @@ public class DownloadsActivity extends AppCompatActivity {
     private DownloadedFilesAdapter adapter;
     private FloatingActionButton fabToggleTheme;
     private SharedPreferences prefs;
+    private FloatingActionButton refreshFab;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,9 +44,27 @@ public class DownloadsActivity extends AppCompatActivity {
                 WindowManager.LayoutParams.FLAG_FULLSCREEN
         );
 
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-
         setContentView(R.layout.activity_downloads);
+
+        refreshFab = findViewById(R.id.refresh_fab);
+
+        refreshFab.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // 🌀 Rotate animation
+                RotateAnimation rotate = new RotateAnimation(
+                        0, 360,
+                        Animation.RELATIVE_TO_SELF, 0.5f,
+                        Animation.RELATIVE_TO_SELF, 0.5f);
+                rotate.setDuration(500);
+                rotate.setRepeatCount(1);
+                v.startAnimation(rotate);
+
+                refreshDownloadList();
+            }
+        });
+
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
 
         downloadedFilesRecyclerView = findViewById(R.id.downloadedFilesRecyclerView);
         downloadedFilesRecyclerView.setLayoutManager(new LinearLayoutManager(this));
@@ -78,6 +101,10 @@ public class DownloadsActivity extends AppCompatActivity {
             }
             editor.apply();
         });
+    }
+
+    private void refreshDownloadList() {
+        Toast.makeText(this, "Refreshing...", Toast.LENGTH_SHORT).show();
     }
 
     private void updateFabIcon(boolean isDarkMode) {
