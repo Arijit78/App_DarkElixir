@@ -4,4 +4,6 @@
     <color name="white">#FFFFFFFF</color>
     <color name="my_light_primary">#FF000000</color>
     <color name="my_dark_primary">#FFFFFFFF</color>
+    <color name="statusBarColorLight">#F5F5F5</color>
+    <color name="statusBarColorDark">#121212</color>
 </resources>
