@@ -9,6 +9,7 @@ import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.MimeTypeMap;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
@@ -16,7 +17,10 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.File;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 public class DownloadedFilesAdapter extends RecyclerView.Adapter<DownloadedFilesAdapter.ViewHolder> {
 
@@ -24,7 +28,7 @@ public class DownloadedFilesAdapter extends RecyclerView.Adapter<DownloadedFiles
     private final List<File> files;
     private final DownloadManager downloadManager;
     private long currentDownloadId;
-    private Handler handler = new Handler(Looper.getMainLooper());
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     public DownloadedFilesAdapter(Context context, List<File> files, long currentDownloadId) {
         this.context = context;
@@ -45,25 +49,24 @@ public class DownloadedFilesAdapter extends RecyclerView.Adapter<DownloadedFiles
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         File file = files.get(position);
         holder.fileNameTextView.setText(file.getName());
-
-        // Optional: show file size if needed
-        long length = file.length();
-        holder.fileSizeTextView.setText(formatFileSize(length));
+        holder.fileSizeTextView.setText(formatFileSize(file.length()));
+        holder.fileDateTextView.setText(getFormattedDate(file.lastModified()));
+        holder.fileTypeTextView.setText(getMimeType(file));
 
         if (isCurrentDownloadingFile(file)) {
-            holder.progressBar.setVisibility(View.VISIBLE);
             int progress = getDownloadProgress();
-            holder.progressBar.setProgress(progress);
 
-            holder.statusTextView.setVisibility(View.VISIBLE);
+            holder.progressBar.setVisibility(View.VISIBLE);
+            holder.progressBar.setProgress(progress);
             holder.statusTextView.setText("Downloading...");
-            holder.statusTextView.setTextColor(0xFF2196F3); // Blue color for downloading
+            holder.statusTextView.setTextColor(0xFF2196F3); // Blue
         } else {
             holder.progressBar.setVisibility(View.GONE);
-            holder.statusTextView.setVisibility(View.VISIBLE);
             holder.statusTextView.setText("Done");
-            holder.statusTextView.setTextColor(0xFF4CAF50); // Green color for done
+            holder.statusTextView.setTextColor(0xFF4CAF50); // Green
         }
+
+        holder.statusTextView.setVisibility(View.VISIBLE);
     }
 
     @Override
@@ -74,15 +77,14 @@ public class DownloadedFilesAdapter extends RecyclerView.Adapter<DownloadedFiles
     private boolean isCurrentDownloadingFile(File file) {
         if (currentDownloadId == -1) return false;
 
-        DownloadManager.Query query = new DownloadManager.Query();
-        query.setFilterById(currentDownloadId);
-        Cursor cursor = downloadManager.query(query);
-        if (cursor != null && cursor.moveToFirst()) {
-            String fileUriString = cursor.getString(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI));
-            cursor.close();
-            if (fileUriString != null) {
-                Uri fileUri = Uri.parse(fileUriString);
-                return file.getAbsolutePath().equals(fileUri.getPath());
+        DownloadManager.Query query = new DownloadManager.Query().setFilterById(currentDownloadId);
+        try (Cursor cursor = downloadManager.query(query)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                String localUri = cursor.getString(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI));
+                if (localUri != null) {
+                    Uri fileUri = Uri.parse(localUri);
+                    return file.getAbsolutePath().equals(fileUri.getPath());
+                }
             }
         }
         return false;
@@ -91,15 +93,14 @@ public class DownloadedFilesAdapter extends RecyclerView.Adapter<DownloadedFiles
     private int getDownloadProgress() {
         if (currentDownloadId == -1) return 0;
 
-        DownloadManager.Query query = new DownloadManager.Query();
-        query.setFilterById(currentDownloadId);
-        Cursor cursor = downloadManager.query(query);
-        if (cursor != null && cursor.moveToFirst()) {
-            int bytesDownloaded = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
-            int bytesTotal = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
-            cursor.close();
-            if (bytesTotal > 0) {
-                return (int) ((bytesDownloaded * 100L) / bytesTotal);
+        DownloadManager.Query query = new DownloadManager.Query().setFilterById(currentDownloadId);
+        try (Cursor cursor = downloadManager.query(query)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int bytesDownloaded = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+                int bytesTotal = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+                if (bytesTotal > 0) {
+                    return (int) ((bytesDownloaded * 100L) / bytesTotal);
+                }
             }
         }
         return 0;
@@ -109,51 +110,83 @@ public class DownloadedFilesAdapter extends RecyclerView.Adapter<DownloadedFiles
         handler.post(progressRunnable);
     }
 
-    private Runnable progressRunnable = new Runnable() {
+    private final Runnable progressRunnable = new Runnable() {
         @Override
         public void run() {
             if (currentDownloadId == -1) {
                 handler.removeCallbacks(this);
                 return;
             }
-
             notifyDataSetChanged();
 
-            DownloadManager.Query query = new DownloadManager.Query();
-            query.setFilterById(currentDownloadId);
-            Cursor cursor = downloadManager.query(query);
-            if (cursor != null && cursor.moveToFirst()) {
-                int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-                cursor.close();
-                if (status == DownloadManager.STATUS_SUCCESSFUL || status == DownloadManager.STATUS_FAILED) {
-                    currentDownloadId = -1;
-                    handler.removeCallbacks(this);
-                    notifyDataSetChanged();
-                    return;
-                }
+            if (isDownloadComplete(currentDownloadId)) {
+                currentDownloadId = -1;
+                handler.removeCallbacks(this);
+                notifyDataSetChanged();
+                return;
             }
-
             handler.postDelayed(this, 500);
         }
     };
 
+    private boolean isDownloadComplete(long downloadId) {
+        DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
+        try (Cursor cursor = downloadManager.query(query)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+                return status == DownloadManager.STATUS_SUCCESSFUL || status == DownloadManager.STATUS_FAILED;
+            }
+        }
+        return false;
+    }
+
     private String formatFileSize(long size) {
         if (size <= 0) return "0 B";
-        final String[] units = new String[]{"B", "KB", "MB", "GB", "TB"};
+        final String[] units = {"B", "KB", "MB", "GB", "TB"};
         int digitGroups = (int) (Math.log10(size) / Math.log10(1024));
         return String.format("%.1f %s", size / Math.pow(1024, digitGroups), units[digitGroups]);
     }
 
+    private String getFormattedDate(long timestamp) {
+        SimpleDateFormat sdf = new SimpleDateFormat("dd MMM yyyy", Locale.getDefault());
+        return sdf.format(new Date(timestamp));
+    }
+
+    private String getMimeType(File file) {
+        String extension = android.webkit.MimeTypeMap.getFileExtensionFromUrl(file.getName());
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) != null ?
+                MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) : "Unknown";
+    }
+
     public static class ViewHolder extends RecyclerView.ViewHolder {
-        TextView fileNameTextView, fileSizeTextView, statusTextView;
-        ProgressBar progressBar;
+        final TextView fileNameTextView, fileSizeTextView, fileDateTextView, fileTypeTextView, statusTextView;
+        final ProgressBar progressBar;
 
         public ViewHolder(@NonNull View itemView) {
             super(itemView);
             fileNameTextView = itemView.findViewById(R.id.fileNameTextView);
             fileSizeTextView = itemView.findViewById(R.id.fileSizeTextView);
+            fileDateTextView = itemView.findViewById(R.id.fileDateTextView);
+            fileTypeTextView = itemView.findViewById(R.id.fileTypeTextView);
             statusTextView = itemView.findViewById(R.id.statusTextView);
             progressBar = itemView.findViewById(R.id.fileDownloadProgressBar);
+        }
+    }
+
+    public void updateFiles(List<File> newFiles) {
+        this.files.clear();
+        this.files.addAll(newFiles);
+        notifyDataSetChanged();
+    }
+
+    public File getFileAt(int position) {
+        return files.get(position);
+    }
+
+    public void removeFileAt(int position) {
+        if (position >= 0 && position < files.size()) {
+            files.remove(position);
+            notifyItemRemoved(position);
         }
     }
 }

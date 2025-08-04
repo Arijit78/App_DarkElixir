@@ -4,8 +4,6 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Environment;
 import android.view.View;
-import android.view.WindowManager;
-import android.view.animation.Animation;
 import android.view.animation.RotateAnimation;
 import android.widget.Toast;
 
@@ -17,6 +15,8 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 
+import androidx.recyclerview.widget.ItemTouchHelper;
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -26,9 +26,11 @@ public class DownloadsActivity extends AppCompatActivity {
 
     private RecyclerView downloadedFilesRecyclerView;
     private DownloadedFilesAdapter adapter;
+    private FloatingActionButton refreshFab;
     private FloatingActionButton fabToggleTheme;
     private SharedPreferences prefs;
-    private FloatingActionButton refreshFab;
+
+    private static final String DOWNLOAD_SUBFOLDER = "DarkElixir";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -36,55 +38,44 @@ public class DownloadsActivity extends AppCompatActivity {
 
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
         boolean isDarkMode = prefs.getBoolean("dark_mode", false);
+
         AppCompatDelegate.setDefaultNightMode(
                 isDarkMode ? AppCompatDelegate.MODE_NIGHT_YES : AppCompatDelegate.MODE_NIGHT_NO);
 
-        getWindow().setFlags(
-                WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                WindowManager.LayoutParams.FLAG_FULLSCREEN
-        );
-
         setContentView(R.layout.activity_downloads);
 
-        refreshFab = findViewById(R.id.refresh_fab);
-
-        refreshFab.setOnClickListener(new View.OnClickListener() {
+        ItemTouchHelper.SimpleCallback simpleItemTouchCallback = new ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT | ItemTouchHelper.RIGHT) {
             @Override
-            public void onClick(View v) {
-                // 🌀 Rotate animation
-                RotateAnimation rotate = new RotateAnimation(
-                        0, 360,
-                        Animation.RELATIVE_TO_SELF, 0.5f,
-                        Animation.RELATIVE_TO_SELF, 0.5f);
-                rotate.setDuration(500);
-                rotate.setRepeatCount(1);
-                v.startAnimation(rotate);
-
-                refreshDownloadList();
+            public boolean onMove(RecyclerView recyclerView, RecyclerView.ViewHolder viewHolder, RecyclerView.ViewHolder target) {
+                return false;
             }
-        });
+
+            @Override
+            public void onSwiped(RecyclerView.ViewHolder viewHolder, int direction) {
+                int position = viewHolder.getAdapterPosition();
+                File fileToDelete = adapter.getFileAt(position);
+
+                if (fileToDelete.exists()) {
+                    boolean deleted = fileToDelete.delete();
+                    if (deleted) {
+                        Toast.makeText(DownloadsActivity.this, "Deleted: " + fileToDelete.getName(), Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(DownloadsActivity.this, "Failed to delete: " + fileToDelete.getName(), Toast.LENGTH_SHORT).show();
+                    }
+                }
+                adapter.removeFileAt(position);
+            }
+        };
+
+        ItemTouchHelper itemTouchHelper = new ItemTouchHelper(simpleItemTouchCallback);
+        itemTouchHelper.attachToRecyclerView(downloadedFilesRecyclerView);
 
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
 
-        downloadedFilesRecyclerView = findViewById(R.id.downloadedFilesRecyclerView);
-        downloadedFilesRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+        adjustStatusBarIconsForTheme(isDarkMode);
 
-        File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
-        List<File> files;
-
-        if (dir != null && dir.exists() && dir.listFiles() != null) {
-            files = Arrays.asList(dir.listFiles());
-        } else {
-            files = new ArrayList<>();
-        }
-
-        long currentDownloadId = getIntent().getLongExtra("currentDownloadId", -1);
-
-        adapter = new DownloadedFilesAdapter(this, files, currentDownloadId);
-        downloadedFilesRecyclerView.setAdapter(adapter);
-
+        refreshFab = findViewById(R.id.refresh_fab);
         fabToggleTheme = findViewById(R.id.fabToggleTheme);
-        updateFabIcon(isDarkMode);
 
         fabToggleTheme.setOnClickListener(v -> {
             boolean darkModeEnabled = prefs.getBoolean("dark_mode", false);
@@ -92,19 +83,54 @@ public class DownloadsActivity extends AppCompatActivity {
 
             if (darkModeEnabled) {
                 AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
-                updateFabIcon(false);
                 editor.putBoolean("dark_mode", false);
+                updateFabIcon(false);
+                adjustStatusBarIconsForTheme(false);
             } else {
                 AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
-                updateFabIcon(true);
                 editor.putBoolean("dark_mode", true);
+                updateFabIcon(true);
+                adjustStatusBarIconsForTheme(true);
             }
+
             editor.apply();
         });
+
+        refreshFab.setOnClickListener(v -> {
+            RotateAnimation rotate = new RotateAnimation(
+                    0, 360,
+                    RotateAnimation.RELATIVE_TO_SELF, 0.5f,
+                    RotateAnimation.RELATIVE_TO_SELF, 0.5f);
+            rotate.setDuration(500);
+            v.startAnimation(rotate);
+
+            Toast.makeText(this, "Refreshing...", Toast.LENGTH_SHORT).show();
+            refreshDownloadList();
+        });
+
+        downloadedFilesRecyclerView = findViewById(R.id.downloadedFilesRecyclerView);
+        downloadedFilesRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+
+        adapter = new DownloadedFilesAdapter(this, new ArrayList<>(), -1);
+        downloadedFilesRecyclerView.setAdapter(adapter);
+
+        updateFabIcon(isDarkMode);
+
+        // Initial list
+        refreshDownloadList();
     }
 
     private void refreshDownloadList() {
-        Toast.makeText(this, "Refreshing...", Toast.LENGTH_SHORT).show();
+        File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), DOWNLOAD_SUBFOLDER);
+        List<File> files;
+        if (dir.exists() && dir.listFiles() != null) {
+            files = Arrays.asList(dir.listFiles());
+        } else {
+            files = new ArrayList<>();
+            Toast.makeText(this, "No downloads found", Toast.LENGTH_SHORT).show();
+        }
+
+        adapter.updateFiles(files);
     }
 
     private void updateFabIcon(boolean isDarkMode) {
@@ -113,6 +139,15 @@ public class DownloadsActivity extends AppCompatActivity {
             fabToggleTheme.setImageResource(android.R.drawable.ic_menu_day);
         } else {
             fabToggleTheme.setImageResource(android.R.drawable.ic_menu_day);
+        }
+    }
+
+    private void adjustStatusBarIconsForTheme(boolean isDarkMode) {
+        View decor = getWindow().getDecorView();
+        if (!isDarkMode) {
+            decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        } else {
+            decor.setSystemUiVisibility(0);
         }
     }
 }

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">DarkElixir</string>
+    <string name="empty_state_image_desc">Empty downloads</string>
 </resources>
